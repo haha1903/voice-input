@@ -336,6 +336,15 @@ final class SpeechEngine {
                 // audio is prefill=false + chunking=vad. VAD chunking
                 // splits at voice-activity breaks so each segment stays
                 // within the decoder's stable range.
+                //
+                // NOTE on supressTokens: with prefill=false, WhisperKit
+                // stops force-injecting <|transcribe|> into the decoder
+                // prefix — so the decoder occasionally generates
+                // <|translate|> on its own and ships an English
+                // translation instead of a Chinese transcript. We block
+                // the translate token at the logits level so it can
+                // never be emitted, no matter what the decoder wants.
+                let translateToken = kit.tokenizer?.specialTokens.translateToken
                 let options = DecodingOptions(
                     verbose: false,
                     task: .transcribe,                      // never translate
@@ -347,6 +356,7 @@ final class SpeechEngine {
                     skipSpecialTokens: true,
                     withoutTimestamps: true,
                     suppressBlank: true,
+                    supressTokens: translateToken.map { [$0] } ?? [],
                     compressionRatioThreshold: 2.4,
                     logProbThreshold: -1.0,
                     noSpeechThreshold: 0.6,
