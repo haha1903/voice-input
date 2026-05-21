@@ -338,13 +338,24 @@ final class SpeechEngine {
                 // within the decoder's stable range.
                 //
                 // NOTE on supressTokens: with prefill=false, WhisperKit
-                // stops force-injecting <|transcribe|> into the decoder
-                // prefix — so the decoder occasionally generates
-                // <|translate|> on its own and ships an English
-                // translation instead of a Chinese transcript. We block
-                // the translate token at the logits level so it can
-                // never be emitted, no matter what the decoder wants.
-                let translateToken = kit.tokenizer?.specialTokens.translateToken
+                // skips the entire prefillTokens construction in
+                // TextDecoder.swift, so the `task` AND `language` we pass
+                // are never force-injected into the decoder prefix. The
+                // decoder ends up choosing its own SOT/language/task
+                // tokens, and on Chinese speech it sometimes picks
+                // <|en|> + <|transcribe|>, producing English output that
+                // looks like a translation. Block at the logits level:
+                // suppress <|translate|> AND every non-target language
+                // token so the only viable language path is the one the
+                // user pinned.
+                var blockedTokens: [Int] = []
+                if let tk = kit.tokenizer {
+                    blockedTokens.append(tk.specialTokens.translateToken)
+                    if let lang, let pinned = tk.convertTokenToId("<|\(lang)|>") {
+                        blockedTokens.append(contentsOf: tk.allLanguageTokens.filter { $0 != pinned })
+                    }
+                }
+
                 let options = DecodingOptions(
                     verbose: false,
                     task: .transcribe,                      // never translate
@@ -356,7 +367,7 @@ final class SpeechEngine {
                     skipSpecialTokens: true,
                     withoutTimestamps: true,
                     suppressBlank: true,
-                    supressTokens: translateToken.map { [$0] } ?? [],
+                    supressTokens: blockedTokens,
                     compressionRatioThreshold: 2.4,
                     logProbThreshold: -1.0,
                     noSpeechThreshold: 0.6,
